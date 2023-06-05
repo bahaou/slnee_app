@@ -1,0 +1,130 @@
+import frappe
+from frappe.desk.desktop import get_desktop_page
+from frappe.desk.doctype.dashboard_chart.dashboard_chart import get
+from frappe.desk.query_report import run
+import json
+from frappe.desk.listview import get_list_settings
+from frappe.defaults import get_user_default
+frappe.whitelist()
+def defaults(key):
+        data=frappe.db.get_defau
+
+
+@frappe.whitelist()
+def defaults(key):
+	data=frappe.db.get_default(key)
+	return
+
+
+@frappe.whitelist()
+def get_list_data(doctype,fields):
+	meta=frappe.get_meta(doctype)
+	data=[]
+	fields=json.loads(fields)
+	if 'name' not in fields:
+		fields.append('name')
+	types={}
+	
+	res=frappe.db.get_list(doctype,fields)
+	for m in meta.fields:
+		types[m.fieldname]=m.fieldtype
+	types['name']='Link'
+	
+	for r in res:
+		d=[]
+		for f in fields:
+			dd={'fieldname':f,'value':r[f],'type':types[f]}
+			print(dd)
+			d.append(dd)
+		data.append(d)
+	return data
+
+
+
+
+@frappe.whitelist()
+def list_settings(doctype):
+	s=get_list_settings(doctype)
+	meta=frappe.get_meta(doctype)
+	fields=json.loads(s.fields)
+	types={}
+	for m in meta.fields:
+		types[m.fieldname]=m.fieldtype
+	for f in fields:
+		try:
+			f['fieldtype']=types[f['fieldname']]
+		except:
+			f['fieldtype']='Data'
+	return fields
+
+
+@frappe.whitelist(allow_guest=True)
+def appSettings(domain=None):
+	settings=frappe.get_doc("Website Settings")
+	# d=[]
+	# d=["name"] = settings.app_name
+	# d=["splash_image"]= settings.splash_image
+	return {"app": settings.app_name, "splash": settings.splash_image}
+@frappe.whitelist()
+def get_workspace(page):
+	workspaces=frappe.desk.desktop.get_desktop_page("{\"name\":\""+page+"\"}")
+	items=workspaces['charts']['items']
+	it=[]
+	for c in items:
+		#print(type(c.__dict__))
+		#c=c.__dict__
+		d={}
+		d["chart_name"]=c.chart_name
+		chart=frappe.get_doc("Dashboard Chart",c.chart_name)
+		d["label"]=c.label
+		d["type"]=chart.type
+		try:
+			filters=json.loads(chart.dynamic_filters_json)
+		except:
+			filters={}
+		
+		for f in filters:
+			try:
+				if "fiscal_year" in filters[f]:
+					filters[f]=frappe.defaults.get_user_default('fiscal_year')
+				if 'Company' in filters[f]:
+					filters[f]=frappe.defaults.get_user_default('Company')
+				if "nowdate()" in filters[f]:
+					filters[f]=frappe.utils.getdate()
+			except:
+				continue
+		f=json.loads(chart.filters_json)
+		try:
+			for i in f:
+				filters[i]=f[i]
+		except:
+			pass
+		d["filters"]=filters
+		
+		try:
+			if filters!=[] and  "from_date" in filters.keys():
+				filters["from_date"]=frappe.utils.getdate(filters["from_date"])
+		except:
+			pass
+		if chart.use_report_chart:
+			d["report_name"]=chart.report_name
+			if 1:
+				data=run(report_name= chart.report_name,filters=filters)
+				
+				if 'chart' in data.keys():
+					data=data["chart"]["data"]
+				d["data"]=data
+				d["report"]=True
+			else :
+				d["failed"]=1
+		else:
+			try:
+				data=get(chart_name=c.chart_name)
+				d["data"]=data
+				d["report"]=False
+			except:
+				d['failed']=1
+		if "data" in d.keys():
+			it.append(d)
+	workspaces["charts"]["items"]=it
+	return(workspaces)
